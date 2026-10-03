@@ -118,12 +118,14 @@ def load_config(base_dir: Path | None = None) -> LabConfig:
     provider = normalize_provider(os.getenv("LLM_PROVIDER", "openai") or "openai")
     model_name = _clean(os.getenv("LLM_MODEL")) or "gpt-4o-mini"
     temperature = _parse_float(os.getenv("LLM_TEMPERATURE"), 0.0)
+    # Default threshold sits between standard threads (~300 tokens, never
+    # compact) and the long-context stress thread (~2700 tokens, compacts).
     compact_threshold_tokens = _parse_int(
-        os.getenv("COMPACT_THRESHOLD_TOKENS"), 3000
+        os.getenv("COMPACT_THRESHOLD_TOKENS"), 1500
     )
     compact_keep_messages = _parse_int(os.getenv("COMPACT_KEEP_MESSAGES"), 8)
     if compact_threshold_tokens <= 0:
-        compact_threshold_tokens = 3000
+        compact_threshold_tokens = 1500
     if compact_keep_messages <= 0:
         compact_keep_messages = 8
 

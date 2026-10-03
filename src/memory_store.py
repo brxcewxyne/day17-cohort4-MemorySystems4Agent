@@ -135,6 +135,11 @@ _THICH_RE = r"(?<!giải\s)(?<!giãi\s)\bthích\b"
 _NEGATION_RE = re.compile(
     r"\b(không(\s*còn|\s*phải)?|chưa|chẳng|đừng)\b", re.IGNORECASE
 )
+_RECALL_REQUEST_RE = re.compile(
+    r"\b(nhắc\s*lại|nhớ\s*lại|kể\s*lại|hãy\s+(nhắc|kể|mô\s*tả)"
+    r"|cho\s+(tôi|mình)\s+biết|tóm\s*tắt|mô\s*tả)\b",
+    re.IGNORECASE,
+)
 
 _NAME_RES = (
     re.compile(
@@ -342,13 +347,17 @@ def extract_profile_updates(message: str) -> dict[str, str]:
             or _QUESTION_FACT_RE.search(sentence)
         )
         question_guarded = bool(_QUESTION_FACT_RE.search(sentence))
+        # Recall requests ("hãy nhắc…", "tóm tắt…", "mô tả…") ask for
+        # stored facts; they must never overwrite the profile. Note that
+        # "nhớ là…" (asking to remember X) is intentionally NOT guarded.
+        recall_guarded = bool(_RECALL_REQUEST_RE.search(sentence))
         place_meta = bool(_META_PLACE_RE.search(sentence))
         travel_only = bool(
             _TRAVEL_VERB_RE.search(sentence)
             and not _RESIDENCE_VERB_RE.search(sentence)
         )
 
-        if not identity_guarded:
+        if not identity_guarded and not recall_guarded:
             for pattern in _NAME_RES:
                 matched_here = False
                 for match in pattern.finditer(sentence):
@@ -362,7 +371,12 @@ def extract_profile_updates(message: str) -> dict[str, str]:
                 if matched_here:
                     break
 
-        if not identity_guarded and not place_meta and not travel_only:
+        if (
+            not identity_guarded
+            and not recall_guarded
+            and not place_meta
+            and not travel_only
+        ):
             for pattern in _LOCATION_RES:
                 for match in pattern.finditer(sentence):
                     if _negated_before(sentence, match.start(1)):
@@ -381,7 +395,7 @@ def extract_profile_updates(message: str) -> dict[str, str]:
                 if candidate and not _looks_like_job(candidate):
                     facts["location"] = candidate
 
-        if not identity_guarded and not place_meta:
+        if not identity_guarded and not recall_guarded and not place_meta:
             for pattern in _JOB_RES:
                 matched_here = False
                 for match in pattern.finditer(sentence):
@@ -406,15 +420,20 @@ def extract_profile_updates(message: str) -> dict[str, str]:
             if signal.search(sentence) and label not in style_parts:
                 style_parts.append(label)
 
-        if _DRINK_RE.search(sentence) and _DRINK_CTX_RE.search(sentence):
+        if (
+            not recall_guarded
+            and _DRINK_RE.search(sentence)
+            and _DRINK_CTX_RE.search(sentence)
+        ):
             facts["drink"] = "cà phê sữa đá"
 
         lowered = sentence.lower()
         for raw, label in _FOOD_ITEMS:
             if raw in lowered and _FOOD_CTX_RE.search(sentence):
-                facts["food"] = label
+                if not recall_guarded:
+                    facts["food"] = label
 
-        if _PET_RE.search(sentence):
+        if _PET_RE.search(sentence) and not recall_guarded:
             pet_name = _PET_NAME_RE.search(sentence)
             if pet_name:
                 facts["pet"] = f"corgi {_clean_value(pet_name.group(1))}"
@@ -425,6 +444,7 @@ def extract_profile_updates(message: str) -> dict[str, str]:
         if (
             interest_match
             and not question_guarded
+            and not recall_guarded
             and not _negated_before(sentence, interest_match.start())
         ):
             clause = interest_match.group(5)
